@@ -104,7 +104,7 @@ def execute_global_registration(source_down, target_down, source_fpfh, target_fp
     Returns:
     o3d.pipelines.registration.RegistrationResult: The result of the RANSAC registration.
     """
-    distance_threshold = voxel_size * 0.5
+    distance_threshold = voxel_size * 0.75
     result = o3d.pipelines.registration.registration_ransac_based_on_feature_matching(
         source_down, target_down, source_fpfh, target_fpfh, distance_threshold,
         o3d.pipelines.registration.TransformationEstimationPointToPoint(False), 4,
