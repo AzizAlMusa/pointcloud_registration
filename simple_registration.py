@@ -64,43 +64,7 @@ def visualize_point_clouds(source, target, title="Original Point Clouds"):
     vis.run()
     vis.destroy_window()
 
-def preprocess_point_cloud(pcd, voxel_size):
-    """
-    Preprocesses the point cloud by filtering out points below a threshold, 
-    removing statistical outliers, downsampling, and estimating normals.
 
-    Args:
-        pcd (o3d.geometry.PointCloud): The input point cloud to preprocess.
-        voxel_size (float): The voxel size for downsampling.
-
-    Returns:
-        tuple: The downsampled point cloud and its computed FPFH features.
-    """
-    # Remove points with z < 0.089
-    pcd = pcd.select_by_index(np.where(np.asarray(pcd.points)[:, 2] >= 0.089)[0])
-    
-    # Remove outliers using a statistical method
-    pcd, ind = pcd.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
-    
-    # Downsample the point cloud
-    pcd_down = pcd.voxel_down_sample(voxel_size)
-    
-    # Compute the bounding box and its volume for analysis
-    # bbox = pcd_down.get_axis_aligned_bounding_box()
-    # volume = np.prod(bbox.get_extent())
-    # print(f"Bounding box volume of downsampled point cloud: {volume:.6f}")
-
-    # Estimate normals for the downsampled point cloud
-    radius_normal = voxel_size * 2
-    pcd_down.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=radius_normal, max_nn=30))
-
-    # Compute FPFH features for the downsampled point cloud
-    radius_feature = voxel_size * 5
-    pcd_fpfh = o3d.pipelines.registration.compute_fpfh_feature(
-        pcd_down,
-        o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=100)
-    )
-    return pcd_down, pcd_fpfh
 
 def compute_point_to_point_statistics(pcd):
     """
@@ -125,6 +89,143 @@ def compute_point_to_point_statistics(pcd):
     std_distance = np.std(distances)
     
     return mean_distance, std_distance
+
+def compute_average_nearest_neighbor_distance(pcd, k=5):
+    """
+    Computes the average nearest neighbor distance for the point cloud.
+
+    Args:
+        pcd (o3d.geometry.PointCloud): The input point cloud.
+        k (int): The number of nearest neighbors to consider.
+
+    Returns:
+        float: The average nearest neighbor distance.
+    """
+    kdtree = o3d.geometry.KDTreeFlann(pcd)
+    distances = []
+
+    for i in range(len(pcd.points)):
+        _, idx, _ = kdtree.search_knn_vector_3d(pcd.points[i], k + 1)
+        # Skip the first neighbor since it is the point itself
+        distances.extend([np.linalg.norm(np.asarray(pcd.points[i]) - np.asarray(pcd.points[j])) for j in idx[1:]])
+
+    return np.mean(distances)
+
+
+def estimate_voxel_size(pcd, target_min=10000, target_max=20000, initial_voxel_size=0.01):
+    """
+    Estimates the voxel size required to downsample a filtered point cloud to achieve a point count 
+    between 10,000 and 20,000 points. Points below z = 0.095 are filtered out before estimation.
+
+    Args:
+        pcd (o3d.geometry.PointCloud): The input point cloud.
+        target_min (int): The minimum target number of points.
+        target_max (int): The maximum target number of points.
+        initial_voxel_size (float): The initial voxel size for downsampling.
+
+    Returns:
+        float: The estimated voxel size.
+    """
+    # Filter out points with z < 0.095
+    pcd_filtered = pcd.select_by_index(np.where(np.asarray(pcd.points)[:, 2] >= 0.095)[0])
+    
+    # Initialize variables
+    voxel_size = initial_voxel_size
+    current_points = len(pcd_filtered.points)
+    tolerance = 0.5  # Fixed tolerance value for adjusting voxel size
+    
+    # Iteratively adjust voxel size until the point count is within the target range
+    while True:
+        pcd_downsampled = pcd_filtered.voxel_down_sample(voxel_size)
+        current_points = len(pcd_downsampled.points)
+        
+        if target_min <= current_points <= target_max:
+            break  # We've found a voxel size that gives us the desired point count
+        
+        if current_points > target_max:
+            voxel_size *= (1 + tolerance)  # Increase voxel size to reduce more points
+        elif current_points < target_min:
+            voxel_size /= (1 + tolerance)  # Decrease voxel size to include more points
+
+        # Check if further adjustments are possible or necessary
+        if voxel_size >= np.linalg.norm(pcd_filtered.get_max_bound() - pcd_filtered.get_min_bound()):
+            print("Voxel size reached the scale of the bounding box, further adjustments may not be possible.")
+            break
+
+   
+    
+    return voxel_size
+
+
+
+def adaptive_max_nn(pcd, radius):
+    """
+    Calculates an adaptive max_nn based on the point cloud density and the chosen radius.
+    
+    Args:
+        pcd (o3d.geometry.PointCloud): The input point cloud.
+        radius (float): The radius within which to count neighbors.
+        
+    Returns:
+        int: The adaptive max_nn value.
+    """
+    # Compute average nearest neighbor distance
+    avg_nn_distance = compute_average_nearest_neighbor_distance(pcd)
+    
+    # Estimate the number of neighbors within the radius
+    if avg_nn_distance > 0:
+        expected_nn = int((radius / avg_nn_distance) ** 2)
+    else:
+        expected_nn = 30  # Fallback in case avg_nn_distance is very small or zero
+
+    return max(30, expected_nn)  # Ensure a minimum value for stability
+
+def preprocess_point_cloud(pcd, voxel_size):
+    """
+    Preprocesses the point cloud by filtering out points below a threshold, 
+    removing statistical outliers, downsampling, and estimating normals.
+
+    Args:
+        pcd (o3d.geometry.PointCloud): The input point cloud to preprocess.
+        voxel_size (float): The voxel size for downsampling.
+
+    Returns:
+        tuple: The downsampled point cloud and its computed FPFH features.
+    """
+    # Remove points with z < 0.089
+    pcd = pcd.select_by_index(np.where(np.asarray(pcd.points)[:, 2] >= 0.095)[0])
+    
+    # Remove outliers using a statistical method
+    pcd, ind = pcd.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
+    
+    # Downsample the point cloud
+    pcd_down = pcd.voxel_down_sample(voxel_size)
+    
+    # Compute the bounding box for analysis
+    bbox = pcd_down.get_axis_aligned_bounding_box()
+    bbox_diagonal = np.linalg.norm(bbox.get_extent())
+    
+    ## we will use 
+    # Adaptive radii based on the bounding box diagonal
+    radius_normal = bbox_diagonal * 0.05  # Adjust the ratio as needed [found empirically]
+    radius_feature = bbox_diagonal * 0.1  # Adjust the ratio as needed [found empirically]
+    
+    # Adaptive max_nn
+    max_nn_normal = adaptive_max_nn(pcd_down, radius_normal)
+    max_nn_feature = adaptive_max_nn(pcd_down, radius_feature)
+    
+    # Estimate normals with the adaptive radius and max_nn
+    pcd_down.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=radius_normal, max_nn=max_nn_normal))
+
+    # Compute FPFH features with the adaptive radius and max_nn
+    pcd_fpfh = o3d.pipelines.registration.compute_fpfh_feature(
+        pcd_down,
+        o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=max_nn_feature)
+    )
+    
+    return pcd_down, pcd_fpfh
+
+
 
 def execute_global_registration(source_down, target_down, source_fpfh, target_fpfh, voxel_size):
     """
@@ -169,6 +270,22 @@ def execute_icp_registration(source, target, transformation, voxel_size):
         o3d.pipelines.registration.TransformationEstimationPointToPlane()
     )
     return result_icp
+
+def get_correspondences(result_ransac):
+    """
+    Extracts correspondences from the RANSAC registration result.
+
+    Args:
+        result_ransac (o3d.pipelines.registration.RegistrationResult): The RANSAC registration result.
+
+    Returns:
+        list: A list of tuples representing correspondences between source and target points.
+    """
+    correspondences = []
+    for corr in result_ransac.correspondence_set:
+        correspondences.append((corr[0], corr[1]))
+    return correspondences
+
 
 def visualize_registration(source, target, transformation, title):
     """
@@ -275,38 +392,50 @@ def main(skip_ransac=False):
         None
     """
     # Load point clouds
-    source_path = "data/005.pcd"
-    target_path = "data/006.pcd"
+    source_path = "pointclouds/003.pcd"
+    target_path = "pointclouds/004.pcd"
     source, target = load_point_clouds(source_path, target_path)
 
     # Visualize the original point clouds before preprocessing
     visualize_point_clouds(source, target, title="Original Point Clouds")
     
     # Compute point-to-point distance statistics of source
+    print("==========================================================")
     print(f"Source has {len(source.points)} points.")
+    print("Computing point-to-point distance statistics on the source point cloud...")
     mean_distance, std_distance = compute_point_to_point_statistics(source)
     print("Statistics before downsampling:")
     print(f"Mean nearest neighbor distance: {mean_distance:.6f}")
     print(f"Standard deviation of distances: {std_distance:.6f}")
+    print("==========================================================")
 
     # Preprocess point clouds
-    voxel_size = 0.0025
+    voxel_size = estimate_voxel_size(source, target_min=10000, target_max=20000, initial_voxel_size=mean_distance)
+     # Print the estimated voxel size for verification
+    print(f"Estimated voxel size: {voxel_size:.6f}")
+
     source_down, source_fpfh = preprocess_point_cloud(source, voxel_size)
     target_down, target_fpfh = preprocess_point_cloud(target, voxel_size)
 
     # Compute point-to-point distance statistics of downsampled source
+    print("==========================================================")
     print(f"Source downsampled has {len(source_down.points)} points.")
+    print("Computing point-to-point distance statistics on the down sampled source point cloud...")
     mean_distance, std_distance = compute_point_to_point_statistics(source_down)
     print("Statistics after downsampling:")
     print(f"Mean nearest neighbor distance: {mean_distance:.6f}")
     print(f"Standard deviation of distances: {std_distance:.6f}")
+    print("==========================================================")
 
     if not skip_ransac:
         # Perform global registration using RANSAC
         result_ransac = execute_global_registration(source_down, target_down, source_fpfh, target_fpfh, voxel_size)
-        print("RANSAC Registration Result:")
-        print(result_ransac)
+               
 
+        # Extract and print correspondences
+        correspondences = get_correspondences(result_ransac)
+        print(f"Number of correspondences found: {len(correspondences)}")
+   
         # Visualize correspondences chosen by RANSAC
         visualize_correspondences(source_down, target_down, np.asarray(result_ransac.correspondence_set))
 
@@ -322,9 +451,7 @@ def main(skip_ransac=False):
 
     # Perform ICP registration
     result_icp = execute_icp_registration(source_down, target_down, initial_transformation, voxel_size)
-    print("ICP Registration Result:")
-    print(result_icp)
-
+  
     # Visualize post-ICP registration
     visualize_registration(source, target, result_icp.transformation, title="Post-ICP Registration")
 

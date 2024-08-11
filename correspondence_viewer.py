@@ -86,7 +86,7 @@ def execute_global_registration(source_down, target_down, source_fpfh, target_fp
     Returns:
         o3d.pipelines.registration.RegistrationResult: The result of the RANSAC registration process.
     """
-    distance_threshold = voxel_size * 1.5  # Define the distance threshold for RANSAC
+    distance_threshold = voxel_size * 0.75  # Define the distance threshold for RANSAC
     result = o3d.pipelines.registration.registration_ransac_based_on_feature_matching(
         source_down, target_down, source_fpfh, target_fpfh, distance_threshold,
         o3d.pipelines.registration.TransformationEstimationPointToPoint(False), 4,
@@ -247,12 +247,12 @@ def main():
     and visualize the correspondences interactively.
     """
     # Load source and target point clouds from files
-    source_path = "data/001.pcd"
-    target_path = "data/002.pcd"
+    source_path = "data/003.pcd"
+    target_path = "data/004.pcd"
     source, target = load_point_clouds(source_path, target_path)
 
     # Preprocess the point clouds (filter, downsample, estimate normals, compute FPFH features)
-    voxel_size = 0.005
+    voxel_size = 0.0025
     source_down, source_fpfh = preprocess_point_cloud(source, voxel_size)
     target_down, target_fpfh = preprocess_point_cloud(target, voxel_size)
 
