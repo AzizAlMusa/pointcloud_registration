@@ -18,10 +18,11 @@ Instructions:
 """
 
 # Directory containing the point cloud files
-data_folder = "data"
+data_folder = "bell"
 
 # Specify the subset of files you want to visualize
-subset_files = ['001.pcd', '002.pcd']  # Example subset
+# subset_files = ['000.pcd','001.pcd','002.pcd','003.pcd', '004.pcd','005.pcd',  '006.pcd', '007.pcd']  # Example subset
+subset_files = ['004.pcd', '005.pcd']  # Example subset
 
 # Generate colors using the Plasma colormap
 plasma = cm.get_cmap('plasma', len(subset_files))

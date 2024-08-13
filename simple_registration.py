@@ -127,7 +127,7 @@ def estimate_voxel_size(pcd, target_min=10000, target_max=20000, initial_voxel_s
         float: The estimated voxel size.
     """
     # Filter out points with z < 0.095
-    pcd_filtered = pcd.select_by_index(np.where(np.asarray(pcd.points)[:, 2] >= 0.095)[0])
+    pcd_filtered = pcd.select_by_index(np.where(np.asarray(pcd.points)[:, 2] >= 0.089)[0])
     
     # Initialize variables
     voxel_size = initial_voxel_size
@@ -209,7 +209,11 @@ def preprocess_point_cloud(pcd, voxel_size):
     # Adaptive radii based on the bounding box diagonal
     radius_normal = bbox_diagonal * 0.05  # Adjust the ratio as needed [found empirically]
     radius_feature = bbox_diagonal * 0.1  # Adjust the ratio as needed [found empirically]
-    
+
+
+    # radius_normal = 2 * voxel_size
+    # radius_feature = 5 * voxel_size
+
     # Adaptive max_nn
     max_nn_normal = adaptive_max_nn(pcd_down, radius_normal)
     max_nn_feature = adaptive_max_nn(pcd_down, radius_feature)
@@ -241,7 +245,13 @@ def execute_global_registration(source_down, target_down, source_fpfh, target_fp
     Returns:
         o3d.pipelines.registration.RegistrationResult: The result of the RANSAC registration.
     """
-    distance_threshold = voxel_size * 0.5
+    source_filtered = source_down.select_by_index(np.where(np.asarray(source_down.points)[:, 2] >= 0.1)[0])
+    bbox = source_filtered.get_axis_aligned_bounding_box()
+    bbox_diagonal = np.linalg.norm(bbox.get_extent())
+    print(f"Bounding box diagonal: {bbox_diagonal:.6f}")
+
+    distance_threshold = bbox_diagonal * 0.01
+
     result = o3d.pipelines.registration.registration_ransac_based_on_feature_matching(
         source_down, target_down, source_fpfh, target_fpfh, distance_threshold,
         o3d.pipelines.registration.TransformationEstimationPointToPoint(False), 4,
@@ -392,22 +402,22 @@ def main(skip_ransac=False):
         None
     """
     # Load point clouds
-    source_path = "pointclouds/003.pcd"
-    target_path = "pointclouds/004.pcd"
+    source_path = "bell/006.pcd"
+    target_path = "bell/007.pcd"
     source, target = load_point_clouds(source_path, target_path)
 
     # Visualize the original point clouds before preprocessing
     visualize_point_clouds(source, target, title="Original Point Clouds")
     
     # Compute point-to-point distance statistics of source
-    print("==========================================================")
-    print(f"Source has {len(source.points)} points.")
-    print("Computing point-to-point distance statistics on the source point cloud...")
-    mean_distance, std_distance = compute_point_to_point_statistics(source)
-    print("Statistics before downsampling:")
-    print(f"Mean nearest neighbor distance: {mean_distance:.6f}")
-    print(f"Standard deviation of distances: {std_distance:.6f}")
-    print("==========================================================")
+    # print("==========================================================")
+    # print(f"Source has {len(source.points)} points.")
+    # print("Computing point-to-point distance statistics on the source point cloud...")
+    # mean_distance, std_distance = compute_point_to_point_statistics(source)
+    # print("Statistics before downsampling:")
+    # print(f"Mean nearest neighbor distance: {mean_distance:.6f}")
+    # print(f"Standard deviation of distances: {std_distance:.6f}")
+    # print("==========================================================")
 
     # Preprocess point clouds
     voxel_size = estimate_voxel_size(source, target_min=10000, target_max=20000, initial_voxel_size=mean_distance)
